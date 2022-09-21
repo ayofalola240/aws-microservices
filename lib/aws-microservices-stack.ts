@@ -1,16 +1,57 @@
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { RemovalPolicy, Stack, StackProps } from "aws-cdk-lib";
+import { LambdaRestApi } from "aws-cdk-lib/aws-apigateway";
+import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
+import { Runtime } from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction, NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
+import { Construct } from "constructs";
+import { join } from "path";
 
-export class AwsMicroservicesStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class AwsMicroservicesStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    const productTable = new Table(this, "product", {
+      partitionKey: {
+        name: "id",
+        type: AttributeType.STRING,
+      },
+      tableName: "product",
+      removalPolicy: RemovalPolicy.DESTROY,
+      billingMode: BillingMode.PAY_PER_REQUEST,
+    });
 
-    // example resource
-    // const queue = new sqs.Queue(this, 'AwsMicroservicesQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
+    // ctrl + space = auto import
+    const nodejsFunctionProps: NodejsFunctionProps = {
+      bundling: {
+        externalModules: ["aws-sdk"],
+      },
+      environment: {
+        PRIMARY_KEY: "id",
+        DYNAMODB_TABLE_NAME: productTable.tableName,
+      },
+      runtime: Runtime.NODEJS_14_X,
+    };
+
+    const productFunction = new NodejsFunction(this, "productLambdaFunction", {
+      entry: join(__dirname, `/../src/product/index.js`),
+      ...nodejsFunctionProps,
+    });
+
+    productTable.grantReadWriteData(productFunction);
+
+    const apigw = new LambdaRestApi(this, "productApi", {
+      restApiName: "Product Service",
+      handler: productFunction,
+      proxy: false,
+    });
+
+    const product = apigw.root.addResource("product");
+    product.addMethod("GET"); // GET /product
+    product.addMethod("POST"); // POST /product
+
+    const singleProduct = product.addResource("{id}"); // product/{id}
+    singleProduct.addMethod("GET"); // GET /product/{id}
+    singleProduct.addMethod("PUT"); // PUT /product/{id}
+    singleProduct.addMethod("DELETE"); // DELETE /product/{id}
   }
 }
